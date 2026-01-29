@@ -1,17 +1,17 @@
 # Moist static energy budget from ERA5 data using centered differences
 #%%
-import configparser
-import xarray as xr
-from pathlib import Path
-import pandas as pd
 import numpy as np
 import numba
+import configparser
+import xarray as xr
+import pandas as pd
 
 R_D = 287.0597 # Gas constant for dry air in J/kg/K as in the IFS documentation
 cp = 3.5 * R_D # J/kg/K
 lh = 2.5008e6 # Latent heat of vaporization in J/kg as in the IFS documentation
 r_earth = 6371229.0 # Radius of the earth in m as in the IFS documentation
 psurf_hPa = 1013.25 # Standard surface pressure in hPa
+g_earth = 9.80665 # Gravity in m/s² as in the IFS documentation
 
 #%%
 
@@ -66,6 +66,18 @@ def interpolate_to_pressure(ds_var, psurf_latlon, lev_tb, aa, bb):
                     / np.log(phyb_full[ibelow]/phyb_full[iabove])
     return var_interp
 
+def get_forecast_time(timestep):
+        """Determine initialization time ("init_time") and lead time ("step") from timestep and previous_timestep."""
+        if timestep.hour > 18:
+            init_time = timestep.normalize() + pd.Timedelta('18 hours')
+        elif (timestep.hour > 6) and (timestep.hour <= 18):
+            init_time = timestep.normalize() + pd.Timedelta('6 hours')
+        elif (timestep.hour > 0) and (timestep.hour <= 6):
+            init_time = timestep.normalize() - pd.Timedelta('6 hours')
+        else:
+            print('Warning: Timestep hour not recognized for forecast time calculation')
+        step = timestep - init_time
+        return init_time, step
 
 class mse_budget:
     """Class for MSE budget analysis from netCDF files."""
@@ -84,9 +96,13 @@ class mse_budget:
             Time interval string, e.g., '1 hour'
         """
         self.config = self._read_config(config_file)
-        self.datasets = {}
         self.timestep = pd.Timestamp(timestep) if timestep else None
         self.time_interval = time_interval
+        self.previous_timestep = self.timestep - pd.Timedelta(self.time_interval)  if timestep else None
+        self.current_init_time = None
+        self.current_step = None
+        self.previous_init_time = None
+        self.previous_step = None
         self.u_current_ml = None
         self.u_previous_ml = None
         self.u_current = None
@@ -135,25 +151,29 @@ class mse_budget:
         self.bb = None
         self.plev = None
         self.plev_half = None
-        
-        # Load model levels
+        self.pdiff = None
+        self.current_datasets = {}
+        self.previous_datasets = {}
+
         self._load_model_levels()
-        
-        # Load data and extract variables if timestep is provided
+        self._get_forecast_time()
         self.load_data()
-        if self.timestep and self.time_interval:
-            self._extract_wind_data()
-            self._extract_other_data()
-            self._extract_param_tendencies()
-            self._compute_phyb_half()            
-            self._compute_geopot()            
-            self._interpolate_variables_to_pressure()
-            self._compute_mse()
-            self._compute_mse_tendency()
-            self._compute_param_mse_tendencies()
-            self._compute_temporal_averages()
-            self._compute_mse_fluxes()
-            self._compute_grid_spacing()
+        self._extract_variables()
+        self._extract_param_tendencies()
+        self._compute_phyb_half() 
+        self._compute_grid_spacing()           
+        self._compute_geopot()            
+        self._interpolate_variables_to_pressure()
+        self._compute_mse()
+        self._compute_mse_tendency()
+        self._compute_param_mse_tendencies()
+        self._compute_temporal_averages()
+        self._compute_mse_fluxes()
+
+    def _get_forecast_time(self):
+        """Determine initialization time ("time") and lead time ("step") from timestep and previous_timestep."""
+        self.current_init_time, self.current_step = get_forecast_time(self.timestep)
+        self.previous_init_time, self.previous_step = get_forecast_time(self.previous_timestep)
     
     def _read_config(self, config_file):
         """Read configuration from ini file."""
@@ -200,55 +220,67 @@ class mse_budget:
         dict
             Dictionary containing loaded xarray datasets
         """
-        data_path = Path(self.config['data']['data_path'])
+        data_path = self.config['data']['data_path']
         
         # List of file keys in the config
-        file_keys = ['file_tendencies', 'file_surface', 'file_wind', 'file_other']
+        file_keys = ['file_tendencies', 'file_surface', 'file_variables']
         
         for key in file_keys:
             filename = self.config['data'].get(key, '').strip()
             if filename:  # Only load if filename is specified
-                filepath = data_path / filename
-                if filepath.exists():
+                print(f"Loading {filename}...")
+                file_time = self.current_init_time.normalize()
+                self.current_datasets[key] = xr.open_dataset(data_path + '/' + str(file_time)[:10] \
+                        +'/'+ filename + str(file_time.year)+str(file_time.month).zfill(2)+str(file_time.day).zfill(2),engine='cfgrib')
+                print(f"  Variables: {list(self.current_datasets[key].data_vars)}")
+                print(f"  Dimensions: {dict(self.current_datasets[key].dims)}")
+
+
+        if (self.previous_init_time.normalize() == self.current_init_time.normalize()):
+            self.previous_datasets = self.current_datasets
+        else:
+            for key in file_keys:
+                filename = self.config['data'].get(key, '').strip()
+                if filename:  # Only load if filename is specified
                     print(f"Loading {filename}...")
-                    self.datasets[key] = xr.open_dataset(filepath)
-                    print(f"  Variables: {list(self.datasets[key].data_vars)}")
-                    print(f"  Dimensions: {dict(self.datasets[key].dims)}")
-                else:
-                    print(f"Warning: File not found - {filepath}")
-        
-        return self.datasets
+                    file_time = self.previous_init_time.normalize()
+                    self.previous_datasets[key] = xr.open_dataset(data_path + '/' + str(file_time)[:10] \
+                            +'/'+ filename + str(file_time.year)+str(file_time.month).zfill(2)+str(file_time.day).zfill(2),engine='cfgrib') 
+                    print(f"  Variables: {list(self.previous_datasets[key].data_vars)}")
+                    print(f"  Dimensions: {dict(self.previous_datasets[key].dims)}")
     
-    def compute_phyb_half(self, timestep=None):
+        
+        return self.current_datasets, self.previous_datasets
+    
+    def compute_phyb_half(self, init_time, step, datasets):
         """
         Compute hybrid pressure half-levels.
         
         Parameters
         ----------
-        timestep : pd.Timestamp, optional
-            Timestep to use. If None, uses self.timestep
+        init_time : pd.Timestamp
+        step : pd.Timedelta
+        datasets : dict
+            Dictionary of xarray datasets
         
         Returns
         -------
         np.ndarray
             Hybrid pressure half-levels array with shape (levels, lat, lon)
         """
-        if timestep is None:
-            timestep = self.timestep
         
-        if 'file_surface' not in self.datasets:
+        if 'file_surface' not in datasets:
             print("Warning: Surface data file not loaded")
             return None
         
-        ds_ps = self.datasets['file_surface']
+        ds_ps = datasets['file_surface']
         
         try:
             # Extract surface pressure and compute hybrid pressure half-levels
-            lnsp = ds_ps.sel(valid_time=timestep).isel(model_level=0).lnsp.values
+            lnsp = ds_ps.sel(time=init_time, step=step).lnsp.values
             phyb_half = (self.aa[:, np.newaxis, np.newaxis] + 
                         self.bb[:, np.newaxis, np.newaxis] * np.exp(lnsp)[np.newaxis, :, :])
             
-            print(f"Computed phyb_half at {timestep}")
             print(f"  Shape: {phyb_half.shape}")
             return phyb_half
             
@@ -261,10 +293,9 @@ class mse_budget:
         Compute hybrid pressure half-levels for current and previous timesteps.
         Stores in self.phyb_half_current and self.phyb_half_previous.
         """
-        previous_timestep = self.timestep - pd.Timedelta(self.time_interval)
         
-        self.phyb_half_current = self.compute_phyb_half(self.timestep)
-        self.phyb_half_previous = self.compute_phyb_half(previous_timestep)
+        self.phyb_half_current = self.compute_phyb_half(self.current_init_time, self.current_step, self.current_datasets)
+        self.phyb_half_previous = self.compute_phyb_half(self.previous_init_time, self.previous_step, self.previous_datasets)
         
     def _compute_geopot(self):
         """
@@ -275,16 +306,17 @@ class mse_budget:
             return
         
         # Get surface geopotential from file_surface
-        if 'file_surface' not in self.datasets:
+        if 'file_surface' not in self.current_datasets:
             print("Warning: Surface data file not loaded")
             return
         
-        ds_ps = self.datasets['file_surface']
+        ds_ps_current = self.current_datasets['file_surface']
+        ds_ps_previous = self.previous_datasets['file_surface']
         
         try:
             # Extract surface geopotential
-            surface_geopot_current = ds_ps.sel(valid_time=self.timestep).isel(model_level=0).z.values
-            surface_geopot_previous = ds_ps.sel(valid_time=self.timestep - pd.Timedelta(self.time_interval)).isel(model_level=0).z.values
+            surface_geopot_current = ds_ps_current.sel(time=self.current_init_time, step=self.current_step).z.values
+            surface_geopot_previous = ds_ps_previous.sel(time=self.previous_init_time, step=self.previous_step).z.values
             
             # Compute geopotential on model levels
             self.geopot_current_ml = calc_geopot(
@@ -301,43 +333,63 @@ class mse_budget:
         except KeyError as e:
             print(f"Error: Variable or time not found - {e}")
     
-    def _extract_other_data(self):
+    def _extract_variables(self):
         """
-        Extract t, q, w from file_other at current and previous timesteps.
+        Extract u, v, t, q, w at current and previous timesteps.
         """
-        if 'file_other' not in self.datasets:
-            print("Warning: file_other not loaded")
+        if 'file_variables' not in self.current_datasets:
+            print("Warning: file_variables not loaded")
             return
         
-        ds_other = self.datasets['file_other']
-        previous_timestep = self.timestep - pd.Timedelta(self.time_interval)
+        ds_current = self.current_datasets['file_variables']
+        ds_previous = self.previous_datasets['file_variables']
         
         try:
+            # Extract u at current timestep
+            self.u_current_ml = ds_current['u'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded u on model levels at {self.current_init_time} step {self.current_step}")
+            print(f"  Shape: {self.u_current_ml.shape}")
+            
+            # Extract u at previous timestep
+            self.u_previous_ml = ds_previous['u'].sel(time=self.previous_init_time, step=self.previous_step).values
+            print(f"Loaded u on model levels at {self.previous_init_time} step {self.previous_step}")
+            print(f"  Shape: {self.u_previous_ml.shape}")
+            
+            # Extract v at current timestep
+            self.v_current_ml = ds_current['v'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded v on model levels at {self.current_init_time} step {self.current_step}")
+            print(f"  Shape: {self.v_current_ml.shape}")
+            
+            # Extract v at previous timestep
+            self.v_previous_ml = ds_previous['v'].sel(time=self.previous_init_time, step=self.previous_step).values
+            print(f"Loaded v on model levels at {self.previous_init_time} step {self.previous_step}")
+            print(f"  Shape: {self.v_previous_ml.shape}")
+
             # Extract t (temperature)
-            self.t_current_ml = ds_other['t'].sel(valid_time=self.timestep).values
-            print(f"Loaded t on model levels at {self.timestep}")
+            self.t_current_ml = ds_current['t'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded t on model levels at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.t_current_ml.shape}")
             
-            self.t_previous_ml = ds_other['t'].sel(valid_time=previous_timestep).values
-            print(f"Loaded t on model levels at {previous_timestep}")
+            self.t_previous_ml = ds_previous['t'].sel(time=self.previous_init_time, step=self.previous_step).values
+            print(f"Loaded t on model levels at {self.previous_init_time} step {self.previous_step}")
             print(f"  Shape: {self.t_previous_ml.shape}")
             
             # Extract q (specific humidity)
-            self.q_current_ml = ds_other['q'].sel(valid_time=self.timestep).values
-            print(f"Loaded q on model levels at {self.timestep}")
+            self.q_current_ml = ds_current['q'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded q on model levels at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.q_current_ml.shape}")
             
-            self.q_previous_ml = ds_other['q'].sel(valid_time=previous_timestep).values
-            print(f"Loaded q on model levels at {previous_timestep}")
+            self.q_previous_ml = ds_previous['q'].sel(time=self.previous_init_time, step=self.previous_step).values
+            print(f"Loaded q on model levels at {self.previous_init_time} step {self.previous_step}")
             print(f"  Shape: {self.q_previous_ml.shape}")
             
             # Extract w (vertical velocity)
-            self.w_current_ml = ds_other['w'].sel(valid_time=self.timestep).values
-            print(f"Loaded w on model levels at {self.timestep}")
+            self.w_current_ml = ds_current['w'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded w on model levels at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.w_current_ml.shape}")
             
-            self.w_previous_ml = ds_other['w'].sel(valid_time=previous_timestep).values
-            print(f"Loaded w on model levels at {previous_timestep}")
+            self.w_previous_ml = ds_previous['w'].sel(time=self.previous_init_time, step=self.previous_step).values
+            print(f"Loaded w on model levels at {self.previous_init_time} step {self.previous_step}")
             print(f"  Shape: {self.w_previous_ml.shape}")
             
         except KeyError as e:
@@ -347,31 +399,31 @@ class mse_budget:
         """
         Extract tendencies due to parametrizations.
         """
-        if 'file_tendencies' not in self.datasets:
+        if 'file_tendencies' not in self.current_datasets:
             print("Warning: file_tendencies not loaded")
             return
         
-        ds_tend = self.datasets['file_tendencies']
+        ds_current = self.current_datasets['file_tendencies']
         
         try:
             # Extract temperature parametrization tendency
-            self.t_param_ml = ds_tend['avg_ttpm'].sel(valid_time=self.timestep).values
-            print(f"Loaded avg_ttpm (t_param) at {self.timestep}")
+            self.t_param_ml = ds_current['avg_ttpm'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded avg_ttpm (t_param) at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.t_param_ml.shape}")
             
             # Extract specific humidity parametrization tendency
-            self.q_param_ml = ds_tend['avg_qtpm'].sel(valid_time=self.timestep).values
-            print(f"Loaded avg_qtpm (q_param) at {self.timestep}")
+            self.q_param_ml = ds_current['avg_qtpm'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded avg_qtpm (q_param) at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.q_param_ml.shape}")
             
             # Extract shortwave radiative tendency
-            self.shortwave_ml = ds_tend['avg_ttswr'].sel(valid_time=self.timestep).values
-            print(f"Loaded avg_ttswr (shortwave) at {self.timestep}")
+            self.shortwave_ml = ds_current['avg_ttswr'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded avg_ttswr (shortwave) at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.shortwave_ml.shape}")
             
             # Extract longwave radiative tendency
-            self.longwave_ml = ds_tend['avg_ttlwr'].sel(valid_time=self.timestep).values
-            print(f"Loaded avg_ttlwr (longwave) at {self.timestep}")
+            self.longwave_ml = ds_current['avg_ttlwr'].sel(time=self.current_init_time, step=self.current_step).values
+            print(f"Loaded avg_ttlwr (longwave) at {self.current_init_time} step {self.current_step}")
             print(f"  Shape: {self.longwave_ml.shape}")
             
         except KeyError as e:
@@ -627,12 +679,12 @@ class mse_budget:
         x_spacing: Distance in meters between longitudinal grid points for each latitude
         y_spacing: Distance in meters between latitudinal grid points
         """
-        if 'file_surface' not in self.datasets:
+        if 'file_surface' not in self.current_datasets:
             print("Warning: Surface data file not loaded for grid spacing calculation")
             return
         
         try:
-            ds_ps = self.datasets['file_surface']
+            ds_ps = self.current_datasets['file_surface']
             
             # x_spacing: Distance between longitude points (depends on latitude)
             self.x_spacing = np.deg2rad(0.25) * np.cos(np.deg2rad(ds_ps.latitude.values)) * r_earth
@@ -693,12 +745,9 @@ class mse_budget:
         if self.y_spacing is None:
             self._compute_grid_spacing()
         
-        if 'file_surface' not in self.datasets:
-            print("Warning: Surface data file not loaded")
-            return None
         
         try:
-            ds_ps = self.datasets['file_surface']
+            ds_ps = self.current_datasets['file_surface']
             latitude = ds_ps.latitude.values
             cos_lat = np.cos(np.deg2rad(latitude))
             
@@ -771,7 +820,37 @@ class mse_budget:
         
     def compute_vertical_integral(self, var):
         """
-        Compute vertical (pressure) integral of a variable
+        Compute mass-weighted vertical (pressure) integral of a variable.
+        If the input variable is in J/kg, the output will be in J/m².
+        
+        Parameters
+        ----------
+        var : np.ndarray
+            3D array with shape (levels, latitude, longitude)
+        
+        Returns
+        -------
+        np.ndarray
+            Vertical integral of var with shape (latitude, longitude)
+        """
+        if self.pdiff is None:
+            self._load_model_levels()
+        
+        try:
+            # Compute gradient along vertical axis (axis=0) using pressure levels in hPa
+            var_pint = np.nansum(var * self.pdiff[:, np.newaxis, np.newaxis], axis=0) *100.0 / g_earth
+            
+            return var_pint
+            
+        except Exception as e:
+            print(f"Error computing vertical integral - {e}")
+            return None
+        
+
+    def compute_vertical_integral_to_p(self, var):
+        """
+        Compute mass-weighted vertical (pressure) integral of a variable.
+        assuming it is zero at the top of the atmosphere.
         
         Parameters
         ----------
@@ -787,8 +866,8 @@ class mse_budget:
             self._load_model_levels()
         
         try:
-            # Compute gradient along vertical axis (axis=0) using pressure levels in Pa
-            var_pint = np.nansum(var * self.pdiff[:, np.newaxis, np.newaxis], axis=0) / psurf_hPa
+            # Compute gradient along vertical axis (axis=0) using pressure levels in hPa
+            var_pint = np.cumsum(var * self.pdiff[:, np.newaxis, np.newaxis], axis=0) *100.0
             
             return var_pint
             
@@ -906,6 +985,92 @@ class mse_budget:
             print(f"Error computing vertical advection - {e}")
             return None
     
+    def to_xarray_levlat(self, var, var_name="variable"):
+        """
+        Convert a 2D numpy array with dimensions pressure and latitude to an xarray DataArray with coordinates.
+        
+        Parameters
+        ----------
+        var : np.ndarray
+            2D array with shape (levels, latitude)
+        var_name : str
+            Name for the data variable
+        
+        Returns
+        -------
+        xr.DataArray
+            DataArray with dimensions (plev, latitude) and proper coordinates
+        """
+        if 'file_surface' not in self.current_datasets:
+            print("Warning: Surface data file not loaded")
+            return None
+        
+        if self.plev is None:
+            self._load_model_levels()
+        
+        try:
+            ds_ps = self.current_datasets['file_surface']
+            latitude = ds_ps.latitude.values
+            
+            # Create xarray DataArray with proper coordinates
+            da = xr.DataArray(
+                var,
+                coords={
+                    'plev': self.plev,
+                    'latitude': latitude
+                },
+                dims=['plev', 'latitude'],
+                name=var_name
+            )
+            
+            return da
+            
+        except Exception as e:
+            print(f"Error converting to xarray - {e}")
+            return None
+
+    def to_xarray_latlon(self, var, var_name="variable"):
+        """
+        Convert a 2D numpy array with dimensions latitude and longitude to an xarray DataArray with coordinates.
+        
+        Parameters
+        ----------
+        var : np.ndarray
+            2D array with shape (latitude, longitude)
+        var_name : str
+            Name for the data variable
+        
+        Returns
+        -------
+        xr.DataArray
+            DataArray with dimensions (latitude, longitude) and proper coordinates
+        """
+        if 'file_surface' not in self.current_datasets:
+            print("Warning: Surface data file not loaded")
+            return None
+        
+        try:
+            ds_ps = self.current_datasets['file_surface']
+            latitude = ds_ps.latitude.values
+            longitude = ds_ps.longitude.values
+            
+            # Create xarray DataArray with proper coordinates
+            da = xr.DataArray(
+                var,
+                coords={
+                    'latitude': latitude,
+                    'longitude': longitude
+                },
+                dims=['latitude', 'longitude'],
+                name=var_name
+            )
+            
+            return da
+            
+        except Exception as e:
+            print(f"Error converting to xarray - {e}")
+            return None
+        
     def to_xarray_3d(self, var, var_name="variable"):
         """
         Convert a 3D numpy array to an xarray DataArray with coordinates.
@@ -922,7 +1087,7 @@ class mse_budget:
         xr.DataArray
             DataArray with dimensions (plev, latitude, longitude) and proper coordinates
         """
-        if 'file_surface' not in self.datasets:
+        if 'file_surface' not in self.current_datasets:
             print("Warning: Surface data file not loaded")
             return None
         
@@ -930,7 +1095,7 @@ class mse_budget:
             self._load_model_levels()
         
         try:
-            ds_ps = self.datasets['file_surface']
+            ds_ps = self.current_datasets['file_surface']
             latitude = ds_ps.latitude.values
             longitude = ds_ps.longitude.values
             
@@ -951,58 +1116,20 @@ class mse_budget:
         except Exception as e:
             print(f"Error converting to xarray - {e}")
             return None
-    
-    def _extract_wind_data(self):
-        """
-        Extract wind variable (u) at current timestep and 1 interval earlier.
-        Stores as numpy arrays in self.u_current and self.u_previous.
-        """
-        if 'file_wind' not in self.datasets:
-            print("Warning: Wind data file not loaded")
-            return
-        
-        ds_wind = self.datasets['file_wind']
-        
-        # Calculate previous timestep
-        previous_timestep = self.timestep - pd.Timedelta(self.time_interval)
-        
-        try:
-            # Extract u at current timestep
-            self.u_current_ml = ds_wind['u'].sel(valid_time=self.timestep).values
-            print(f"Loaded u on model levels at {self.timestep}")
-            print(f"  Shape: {self.u_current_ml.shape}")
-            
-            # Extract u at previous timestep
-            self.u_previous_ml = ds_wind['u'].sel(valid_time=previous_timestep).values
-            print(f"Loaded u on model levels at {previous_timestep}")
-            print(f"  Shape: {self.u_previous_ml.shape}")
-            
-            # Extract v at current timestep
-            self.v_current_ml = ds_wind['v'].sel(valid_time=self.timestep).values
-            print(f"Loaded v on model levels at {self.timestep}")
-            print(f"  Shape: {self.v_current_ml.shape}")
-            
-            # Extract v at previous timestep
-            self.v_previous_ml = ds_wind['v'].sel(valid_time=previous_timestep).values
-            print(f"Loaded v on model levels at {previous_timestep}")
-            print(f"  Shape: {self.v_previous_ml.shape}")
-            
-        except KeyError as e:
-            print(f"Error: Variable or time not found - {e}")
 
 
 
 
-#%%
+
 if __name__ == "__main__":
-    mse_budget_instance = mse_budget(config_file='mse_budget.ini', timestep='2005-06-01 7:00', time_interval='1 hour')
+    mse_budget_instance = mse_budget(config_file='mse_budget.ini', timestep='2005-06-02 17:00', time_interval='1 hour')
 
-    mse_integral = mse_budget_instance.compute_vertical_integral(mse_budget_instance.mse)
-
-
+    #mse_integral = mse_budget_instance.compute_vertical_integral(mse_budget_instance.mse_tendency)
 
 
-#%%
+
+
+
 
     mse_budget_instance.compute_flux_divergences()
 
