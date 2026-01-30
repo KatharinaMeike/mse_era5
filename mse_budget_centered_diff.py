@@ -72,7 +72,21 @@ def get_forecast_time(timestep):
             init_time = timestep.normalize() + pd.Timedelta('18 hours')
         elif (timestep.hour > 6) and (timestep.hour <= 18):
             init_time = timestep.normalize() + pd.Timedelta('6 hours')
-        elif (timestep.hour > 0) and (timestep.hour <= 6):
+        elif timestep.hour <= 6:
+            init_time = timestep.normalize() - pd.Timedelta('6 hours')
+        else:
+            print('Warning: Timestep hour not recognized for forecast time calculation')
+        step = timestep - init_time
+        return init_time, step
+
+def get_forecast_time_previous(timestep):
+        """Determine initialization time ("init_time") and lead time ("step") from timestep and previous_timestep.
+        In contrast to get_forecast_time, this function returns the analysis time, not the 12 hour time of the previous forecast."""
+        if timestep.hour >= 18:
+            init_time = timestep.normalize() + pd.Timedelta('18 hours')
+        elif (timestep.hour >= 6) and (timestep.hour < 18):
+            init_time = timestep.normalize() + pd.Timedelta('6 hours')
+        elif timestep.hour < 6:
             init_time = timestep.normalize() - pd.Timedelta('6 hours')
         else:
             print('Warning: Timestep hour not recognized for forecast time calculation')
@@ -134,7 +148,8 @@ class mse_budget:
         self.q_param = None
         self.shortwave = None
         self.longwave = None
-        self.mse_tend_rad = None
+        self.mse_tend_sw = None
+        self.mse_tend_lw = None
         self.mse_tend_conv = None
         self.mse = None
         self.u = None
@@ -173,7 +188,7 @@ class mse_budget:
     def _get_forecast_time(self):
         """Determine initialization time ("time") and lead time ("step") from timestep and previous_timestep."""
         self.current_init_time, self.current_step = get_forecast_time(self.timestep)
-        self.previous_init_time, self.previous_step = get_forecast_time(self.previous_timestep)
+        self.previous_init_time, self.previous_step = get_forecast_time_previous(self.previous_timestep)
     
     def _read_config(self, config_file):
         """Read configuration from ini file."""
@@ -592,8 +607,9 @@ class mse_budget:
     def _compute_param_mse_tendencies(self):
         """
         Compute MSE tendencies from parametrizations.
-        mse_tend_rad = c_p * (shortwave + longwave)
-        mse_tend_conv = c_p * t_param - mse_tend_rad + lh * q_param
+        mse_tend_sw = c_p * self.shortwave 
+        mse_tend_lw = c_p * self.longwave
+        mse_tend_conv = c_p * self.t_param - mse_tend_sw - mse_tend_lw + lh * self.q_param
         """
         if self.shortwave is None or self.longwave is None or self.t_param is None or self.q_param is None:
             print("Warning: Parametrization tendencies not available")
@@ -601,14 +617,17 @@ class mse_budget:
         
         try:
             # Compute radiative MSE tendency
-            self.mse_tend_rad = cp * (self.shortwave + self.longwave)
+            self.mse_tend_sw = cp * self.shortwave
+            self.mse_tend_lw = cp * self.longwave
             
             # Compute convective MSE tendency
-            self.mse_tend_conv = cp * self.t_param - self.mse_tend_rad + lh * self.q_param
+            self.mse_tend_conv = cp * self.t_param - self.mse_tend_sw - self.mse_tend_lw + lh * self.q_param
             
             print(f"Computed parametrization MSE tendencies")
-            print(f"  mse_tend_rad shape: {self.mse_tend_rad.shape}")
-            print(f"  mse_tend_rad range: [{self.mse_tend_rad.min():.4e}, {self.mse_tend_rad.max():.4e}]")
+            print(f"  mse_tend_sw shape: {self.mse_tend_sw.shape}")
+            print(f"  mse_tend_sw range: [{self.mse_tend_sw.min():.4e}, {self.mse_tend_sw.max():.4e}]")
+            print(f"  mse_tend_lw shape: {self.mse_tend_lw.shape}")
+            print(f"  mse_tend_lw range: [{self.mse_tend_lw.min():.4e}, {self.mse_tend_lw.max():.4e}]")
             print(f"  mse_tend_conv shape: {self.mse_tend_conv.shape}")
             print(f"  mse_tend_conv range: [{self.mse_tend_conv.min():.4e}, {self.mse_tend_conv.max():.4e}]")
             
@@ -867,7 +886,7 @@ class mse_budget:
         
         try:
             # Compute gradient along vertical axis (axis=0) using pressure levels in hPa
-            var_pint = np.cumsum(var * self.pdiff[:, np.newaxis, np.newaxis], axis=0) *100.0
+            var_pint = np.nancumsum(var * self.pdiff[:, np.newaxis, np.newaxis], axis=0) *100.0
             
             return var_pint
             
@@ -1131,9 +1150,9 @@ if __name__ == "__main__":
 
 
 
-    mse_budget_instance.compute_flux_divergences()
+    #mse_budget_instance.compute_flux_divergences()
 
-    # Right-hand side of MSE budget
+"""    # Right-hand side of MSE budget
     rhs_mse = -mse_budget_instance.dx_zonal_flux -\
           mse_budget_instance.dy_merid_flux -\
           mse_budget_instance.dp_vertical_flux +\
@@ -1186,7 +1205,7 @@ if __name__ == "__main__":
         # Residual of temperature budget
         vminmax = 1e-3
         plt.imshow(((mse_budget_instance.t_current - mse_budget_instance.t_previous)/3600.0 - rhs_temp)[:,:,300],vmin=-vminmax,vmax=vminmax)
-        plt.colorbar()
+        plt.colorbar()"""
 
 #%%
 
