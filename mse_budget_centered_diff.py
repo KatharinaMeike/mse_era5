@@ -96,7 +96,8 @@ def get_forecast_time_previous(timestep):
 class mse_budget:
     """Class for MSE budget analysis from netCDF files."""
     
-    def __init__(self, config_file='mse_budget.ini', timestep=None, time_interval=None):
+    def __init__(self, config_file='mse_budget.ini', timestep=None, time_interval=None,\
+                  budget='hourly_P137'):
         """
         Initialize MSE budget object.
         
@@ -170,20 +171,37 @@ class mse_budget:
         self.current_datasets = {}
         self.previous_datasets = {}
 
-        self._load_model_levels()
-        self._get_forecast_time()
-        self.load_data()
-        self._extract_variables()
-        self._extract_param_tendencies()
-        self._compute_phyb_half() 
-        self._compute_grid_spacing()           
-        self._compute_geopot()            
-        self._interpolate_variables_to_pressure()
-        self._compute_mse()
-        self._compute_mse_tendency()
-        self._compute_param_mse_tendencies()
-        self._compute_temporal_averages()
-        self._compute_mse_fluxes()
+        if budget == 'hourly_P137':
+            self._load_model_levels()
+            self._get_forecast_time()
+            self.load_data()
+            self._extract_variables()
+            self._extract_param_tendencies()
+            self._compute_phyb_half() 
+            self._compute_grid_spacing()           
+            self._compute_geopot()            
+            self._interpolate_variables_to_pressure()
+            self._compute_mse()
+            self._compute_mse_tendency()
+            self._compute_param_mse_tendencies()
+            self._compute_temporal_averages()
+            self._compute_mse_fluxes()
+        elif budget == 'daily_P137':
+            self._load_model_levels()
+            self._get_forecast_time()
+            self.load_data(tendencies=False)
+            self._extract_variables()
+            self._compute_phyb_half()
+            self._compute_grid_spacing()
+            self._compute_geopot()
+            self._interpolate_variables_to_pressure()
+            self._compute_mse()
+            self._compute_mse_tendency()
+            self._compute_temporal_averages()
+            self._compute_mse_fluxes()
+            self.param_mse_tendencies_from_hourly()
+            self._compute_param_mse_tendencies()
+
 
     def _get_forecast_time(self):
         """Determine initialization time ("time") and lead time ("step") from timestep and previous_timestep."""
@@ -226,7 +244,7 @@ class mse_budget:
         except Exception as e:
             print(f"Error loading model levels - {e}")
     
-    def load_data(self):
+    def load_data(self, tendencies=True):
         """
         Load netCDF files specified in configuration.
         
@@ -238,7 +256,10 @@ class mse_budget:
         data_path = self.config['data']['data_path']
         
         # List of file keys in the config
-        file_keys = ['file_tendencies', 'file_surface', 'file_variables']
+        if tendencies:
+            file_keys = ['file_tendencies', 'file_surface', 'file_variables']
+        else:
+            file_keys = ['file_surface', 'file_variables']
         
         for key in file_keys:
             filename = self.config['data'].get(key, '').strip()
@@ -1003,6 +1024,74 @@ class mse_budget:
         except Exception as e:
             print(f"Error computing vertical advection - {e}")
             return None
+        
+    def param_mse_tendencies_from_hourly(self):
+        """
+        Interpolate tendencies due to parametrizations from model-levels to pressure-levels
+        """
+        data_path = self.config['data']['data_path']
+        first_param_timestep = self.previous_timestep + pd.Timedelta('1h')
+        first_init, first_step = get_forecast_time(first_param_timestep)
+        first_filetime = first_init.normalize()
+        # Extract model-level tendencies
+        filename = self.config['data'].get('file_tendencies', '').strip()
+        ds = xr.open_dataset(data_path + '/' + str(first_filetime)[:10] \
+                        +'/'+ filename + str(first_filetime.year)+str(first_filetime.month).zfill(2)+str(first_filetime.day).zfill(2),engine='cfgrib')
+        t_param_ml = ds['avg_ttpm'].sel(time=first_init, step=first_step).values
+        q_param_ml = ds['avg_qtpm'].sel(time=first_init, step=first_step).values
+        shortwave_ml = ds['avg_ttswr'].sel(time=first_init, step=first_step).values
+        longwave_ml = ds['avg_ttlwr'].sel(time=first_init, step=first_step).values
+        # Read surface pressure
+        ds_ps = xr.open_dataset(data_path + '/' + str(first_filetime)[:10] \
+                        +'/'+ self.config['data'].get('file_surface', '').strip() + str(first_filetime.year)+str(first_filetime.month).zfill(2)+str(first_filetime.day).zfill(2),engine='cfgrib')
+        p_surf = np.exp(ds_ps.sel(time=first_init, step=first_step).lnsp.values)
+        t_param = interpolate_to_pressure(
+            t_param_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+        q_param = interpolate_to_pressure(
+            q_param_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+        shortwave = interpolate_to_pressure(
+            shortwave_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+        longwave = interpolate_to_pressure(
+            longwave_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+        
+        filetime_before = first_filetime
+        for hourly_timestep in pd.date_range(first_param_timestep, self.timestep, freq='1h')[1:]:
+            init_time, step = get_forecast_time(hourly_timestep)
+            file_time = init_time.normalize()
+            if file_time != filetime_before: # Open new dataset
+                ds.close()
+                ds_ps.close()
+                ds = xr.open_dataset(data_path + '/' + str(file_time)[:10] \
+                        +'/'+ filename + str(file_time.year)+str(file_time.month).zfill(2)+str(file_time.day).zfill(2),engine='cfgrib')
+                ds_ps = xr.open_dataset(data_path + '/' + str(file_time)[:10] \
+                        +'/'+ self.config['data'].get('file_surface', '').strip() + str(file_time.year)+str(file_time.month).zfill(2)+str(file_time.day).zfill(2),engine='cfgrib')
+                filetime_before = file_time
+            # Read surface pressure
+            p_surf = np.exp(ds_ps.sel(time=init_time, step=step).lnsp.values)
+            # Extract model-level tendencies
+            t_param_ml = ds['avg_ttpm'].sel(time=init_time, step=step).values
+            q_param_ml = ds['avg_qtpm'].sel(time=init_time, step=step).values
+            shortwave_ml = ds['avg_ttswr'].sel(time=init_time, step=step).values
+            longwave_ml = ds['avg_ttlwr'].sel(time=init_time, step=step).values
+            # Interpolate to pressure levels
+            t_param += interpolate_to_pressure(
+                t_param_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+            q_param += interpolate_to_pressure(
+                q_param_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+            shortwave += interpolate_to_pressure(
+                shortwave_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+            longwave += interpolate_to_pressure(
+                longwave_ml, p_surf, self.plev * 100.0, self.aa, self.bb)
+        # Average over number of hourly timesteps
+        n_hours = int((self.timestep - self.previous_timestep) / pd.Timedelta('1h'))
+        print(n_hours)
+        self.t_param = t_param / n_hours
+        self.q_param = q_param / n_hours
+        self.shortwave = shortwave / n_hours
+        self.longwave = longwave / n_hours
+        ds.close()
+        ds_ps.close()
+        return t_param, q_param, shortwave, longwave
     
     def to_xarray_levlat(self, var, var_name="variable"):
         """
