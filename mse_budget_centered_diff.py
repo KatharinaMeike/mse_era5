@@ -201,6 +201,21 @@ class mse_budget:
             self._compute_mse_fluxes()
             self.param_mse_tendencies_from_hourly()
             self._compute_param_mse_tendencies()
+        elif budget == 'daily_P37':
+            self._load_model_levels(plev_in_mlev=False)
+            self._get_forecast_time()
+            self.load_data(tendencies=False)
+            self._extract_variables()
+            self._compute_phyb_half()
+            self._compute_grid_spacing()
+            self._compute_geopot()
+            self._interpolate_variables_to_pressure()
+            self._compute_mse()
+            self._compute_mse_tendency()
+            self._compute_temporal_averages()
+            self._compute_mse_fluxes()
+            self.param_mse_tendencies_from_hourly()
+            self._compute_param_mse_tendencies()
 
 
     def _get_forecast_time(self):
@@ -214,7 +229,7 @@ class mse_budget:
         config.read(config_file)
         return config
     
-    def _load_model_levels(self):
+    def _load_model_levels(self, plev_in_mlev = True):
         """Load model level parameters (aa, bb, plev, plev_half) from file."""
         try:
             ml_path = self.config['data'].get('file_model_level', '').strip()
@@ -225,12 +240,16 @@ class mse_budget:
             mlev = np.genfromtxt(ml_path)
             self.aa = mlev[:, 1].astype('float64')
             self.bb = mlev[:, 2].astype('float64')
-            self.plev = mlev[1:, 4].astype('float64')
+            if plev_in_mlev:
+                self.plev = mlev[1:, 4].astype('float64')
+            else:
+                pl_file = self.config['data'].get('file_pressure_levels', '').strip()
+                self.plev = np.genfromtxt(pl_file,delimiter='/',dtype='float64')[::-1]
+                print(self.plev)
             
             # Compute plev_half (midpoints between levels, with 0 at the top and psurf_hPa at the bottom)
-            if self.plev is not None:
-                midpoints = 0.5 * (self.plev[:-1] + self.plev[1:])
-                self.plev_half = np.concatenate([[0.0], midpoints, [psurf_hPa]])
+            midpoints = 0.5 * (self.plev[:-1] + self.plev[1:])
+            self.plev_half = np.concatenate([[0.0], midpoints, [psurf_hPa]])
             self.pdiff = self.plev_half[1:] - self.plev_half[:-1]
             
             print(f"Loaded model levels from {ml_path}")
