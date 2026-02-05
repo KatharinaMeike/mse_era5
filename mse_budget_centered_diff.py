@@ -216,6 +216,15 @@ class mse_budget:
             self._compute_mse_fluxes()
             self.param_mse_tendencies_from_hourly()
             self._compute_param_mse_tendencies()
+        # Read variables from pressure-level data, do not use tendencies due to paramterizations
+        elif budget == 'daily_P37_varp':
+            self.load_netcdf_plev_data()
+            self.extract_plev_variables()
+            self._compute_mse()
+            self._compute_mse_tendency()
+            self._compute_temporal_averages()
+            self._compute_mse_fluxes()
+
 
 
     def _get_forecast_time(self):
@@ -289,6 +298,9 @@ class mse_budget:
                         +'/'+ filename + str(file_time.year)+str(file_time.month).zfill(2)+str(file_time.day).zfill(2),engine='cfgrib')
                 print(f"  Variables: {list(self.current_datasets[key].data_vars)}")
                 print(f"  Dimensions: {dict(self.current_datasets[key].dims)}")
+                if key == 'file_surface':
+                    self.latitude = np.float64(self.current_datasets[key].latitude.values)
+                    self.longitude = np.float64(self.current_datasets[key].longitude.values)
 
 
         if (self.previous_init_time.normalize() == self.current_init_time.normalize()):
@@ -305,6 +317,33 @@ class mse_budget:
                     print(f"  Dimensions: {dict(self.previous_datasets[key].dims)}")
     
         
+        return self.current_datasets, self.previous_datasets
+    
+    def load_netcdf_plev_data(self,file_string = '.6hrly.nc'):
+        """
+        Load netCDF data for u, v, t, q, w, z.
+        The data should be on the standard 37 pressure levels from ECMWF.
+        """
+        file_keys = {'file_u', 'file_v', 'file_t', 'file_q', 'file_w', 'file_z'}
+        for key in file_keys:
+            filename = self.config['data'].get(key, '').strip()
+            if filename:  # Only load if filename is specified
+                print(f"Loading {filename}...")
+                self.current_datasets[key] = xr.open_dataset(filename +\
+                    str(self.timestep.year) + '_' + str(self.timestep.month).zfill(2) + file_string)
+                self.previous_datasets[key] = xr.open_dataset(filename +\
+                    str(self.previous_timestep.year) + '_' + str(self.previous_timestep.month).zfill(2) + file_string)
+                # Rename valid_time to time if it exists
+                if 'valid_time' in self.current_datasets[key].coords:
+                    self.current_datasets[key] = self.current_datasets[key].rename({'valid_time': 'time'})
+                if 'valid_time' in self.previous_datasets[key].coords:
+                    self.previous_datasets[key] = self.previous_datasets[key].rename({'valid_time': 'time'})
+                if 'pressure_level' in self.current_datasets[key].coords:
+                    self.current_datasets[key] = self.current_datasets[key].rename({'pressure_level': 'level'})
+                if 'pressure_level' in self.previous_datasets[key].coords:
+                    self.previous_datasets[key] = self.previous_datasets[key].rename({'pressure_level': 'level'})
+                self.current_datasets[key] = self.current_datasets[key].sortby('level', ascending=True)
+                self.previous_datasets[key] = self.previous_datasets[key].sortby('level', ascending=True)
         return self.current_datasets, self.previous_datasets
     
     def compute_phyb_half(self, init_time, step, datasets):
@@ -449,6 +488,86 @@ class mse_budget:
             
         except KeyError as e:
             print(f"Error: Variable or time not found - {e}")
+
+    def extract_plev_variables(self):
+        """
+        Extract variables from pressure-level netCDF data.
+        """
+        if 'file_u' in self.current_datasets:
+            self.u_current = self.current_datasets['file_u'].sel(time=self.timestep).u.values
+            print(f"Loaded u on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.u_current.shape}")
+        
+        if 'file_u' in self.previous_datasets:
+            self.u_previous = self.previous_datasets['file_u'].sel(time=self.previous_timestep).u.values
+            print(f"Loaded u on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.u_previous.shape}")
+        
+        if 'file_v' in self.current_datasets:
+            self.v_current = self.current_datasets['file_v'].sel(time=self.timestep).v.values
+            print(f"Loaded v on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.v_current.shape}")
+        
+        if 'file_v' in self.previous_datasets:
+            self.v_previous = self.previous_datasets['file_v'].sel(time=self.previous_timestep).v.values
+            print(f"Loaded v on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.v_previous.shape}")
+        
+        if 'file_t' in self.current_datasets:
+            ds = self.current_datasets['file_t']
+            self.t_current = ds.sel(time=self.timestep).t.values
+            print(f"Loaded t on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.t_current.shape}")
+            # Read pressure levels
+            self.plev = np.float64(ds.level.values)
+            print(self.plev)
+            # Compute plev_half (midpoints between levels, with 0 at the top and psurf_hPa at the bottom)
+            midpoints = 0.5 * (self.plev[:-1] + self.plev[1:])
+            self.plev_half = np.concatenate([[0.0], midpoints, [psurf_hPa]])
+            self.pdiff = self.plev_half[1:] - self.plev_half[:-1]
+            # x_spacing: Distance between longitude points (depends on latitude)
+            self.latitude = np.float64(ds.latitude.values)
+            self.longitude = np.float64(ds.longitude.values)
+            self.x_spacing = np.deg2rad(0.25) * np.cos(np.deg2rad(self.latitude)) * r_earth
+            # y_spacing: Distance between latitude points (constant)
+            self.y_spacing = np.deg2rad(0.25) * r_earth
+
+        
+        if 'file_t' in self.previous_datasets:
+            self.t_previous = self.previous_datasets['file_t'].sel(time=self.previous_timestep).t.values
+            print(f"Loaded t on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.t_previous.shape}")
+        
+        if 'file_q' in self.current_datasets:
+            self.q_current = self.current_datasets['file_q'].sel(time=self.timestep).q.values
+            print(f"Loaded q on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.q_current.shape}")
+        
+        if 'file_q' in self.previous_datasets:
+            self.q_previous = self.previous_datasets['file_q'].sel(time=self.previous_timestep).q.values
+            print(f"Loaded q on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.q_previous.shape}")
+
+        if 'file_w' in self.current_datasets:
+            self.w_current = self.current_datasets['file_w'].sel(time=self.timestep).w.values
+            print(f"Loaded w on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.w_current.shape}")
+
+        if 'file_w' in self.previous_datasets:
+            self.w_previous = self.previous_datasets['file_w'].sel(time=self.previous_timestep).w.values
+            print(f"Loaded w on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.w_previous.shape}")
+
+        if 'file_z' in self.current_datasets:
+            self.geopot_current = self.current_datasets['file_z'].sel(time=self.timestep).z.values
+            print(f"Loaded geopotential on pressure levels at {self.timestep}")
+            print(f"  Shape: {self.geopot_current.shape}")
+
+        if 'file_z' in self.previous_datasets:
+            self.geopot_previous = self.previous_datasets['file_z'].sel(time=self.previous_timestep).z.values
+            print(f"Loaded geopotential on pressure levels at {self.previous_timestep}")
+            print(f"  Shape: {self.geopot_previous.shape}")
+
     
     def _extract_param_tendencies(self):
         """
@@ -746,7 +865,7 @@ class mse_budget:
             ds_ps = self.current_datasets['file_surface']
             
             # x_spacing: Distance between longitude points (depends on latitude)
-            self.x_spacing = np.deg2rad(0.25) * np.cos(np.deg2rad(ds_ps.latitude.values)) * r_earth
+            self.x_spacing = np.deg2rad(0.25) * np.cos(np.deg2rad(self.latitude)) * r_earth
             
             # y_spacing: Distance between latitude points (constant)
             self.y_spacing = np.deg2rad(0.25) * r_earth
@@ -806,8 +925,7 @@ class mse_budget:
         
         
         try:
-            ds_ps = self.current_datasets['file_surface']
-            latitude = ds_ps.latitude.values
+            latitude = self.latitude
             cos_lat = np.cos(np.deg2rad(latitude))
             
             # Factor of -1 because the latitudes are ordered in decreasing order
@@ -1128,25 +1246,20 @@ class mse_budget:
         xr.DataArray
             DataArray with dimensions (plev, latitude) and proper coordinates
         """
-        if 'file_surface' not in self.current_datasets:
-            print("Warning: Surface data file not loaded")
-            return None
         
         if self.plev is None:
             self._load_model_levels()
         
-        try:
-            ds_ps = self.current_datasets['file_surface']
-            latitude = ds_ps.latitude.values
-            
+        try:            
             # Create xarray DataArray with proper coordinates
             da = xr.DataArray(
-                var,
+                var[np.newaxis,:,:],
                 coords={
+                    'time': [self.timestep],
                     'plev': self.plev,
-                    'latitude': latitude
+                    'latitude': self.latitude
                 },
-                dims=['plev', 'latitude'],
+                dims=['time', 'plev', 'latitude'],
                 name=var_name
             )
             
@@ -1172,23 +1285,18 @@ class mse_budget:
         xr.DataArray
             DataArray with dimensions (latitude, longitude) and proper coordinates
         """
-        if 'file_surface' not in self.current_datasets:
-            print("Warning: Surface data file not loaded")
-            return None
         
         try:
-            ds_ps = self.current_datasets['file_surface']
-            latitude = ds_ps.latitude.values
-            longitude = ds_ps.longitude.values
-            
+               
             # Create xarray DataArray with proper coordinates
             da = xr.DataArray(
-                var,
+                var[np.newaxis,:,:],
                 coords={
-                    'latitude': latitude,
-                    'longitude': longitude
+                    'time': [self.timestep],
+                    'latitude': self.latitude,
+                    'longitude': self.longitude
                 },
-                dims=['latitude', 'longitude'],
+                dims=['time', 'latitude', 'longitude'],
                 name=var_name
             )
             
@@ -1214,27 +1322,25 @@ class mse_budget:
         xr.DataArray
             DataArray with dimensions (plev, latitude, longitude) and proper coordinates
         """
-        if 'file_surface' not in self.current_datasets:
-            print("Warning: Surface data file not loaded")
-            return None
         
         if self.plev is None:
             self._load_model_levels()
         
         try:
             ds_ps = self.current_datasets['file_surface']
-            latitude = ds_ps.latitude.values
-            longitude = ds_ps.longitude.values
+            latitude = self.latitude
+            longitude = self.longitude
             
             # Create xarray DataArray with proper coordinates
             da = xr.DataArray(
-                var,
+                var[np.newaxis,:,:,:],
                 coords={
+                    'time': [self.timestep],
                     'plev': self.plev,
                     'latitude': latitude,
                     'longitude': longitude
                 },
-                dims=['plev', 'latitude', 'longitude'],
+                dims=['time','plev', 'latitude', 'longitude'],
                 name=var_name
             )
             

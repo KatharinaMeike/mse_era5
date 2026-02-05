@@ -1,0 +1,4 @@
+  File "/home/katharinah/scripts/mse_era5/run_adv_fluxes_p37/p37_mse_budget.py", line 9
+    sys.path.append('..'
+                   ^
+SyntaxError: '(' was never closed

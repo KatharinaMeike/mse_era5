@@ -8,7 +8,6 @@ import pandas as pd
 plot_path = '/project2/tas1/katharinah/mse/precip/plots/'
 data_path = '/project2/tas1/abacus/data1/tas/archive/Reanalysis/ERA5/'
 
-#%%
 
 # Total precipitation
 ds_mtpr = xr.open_dataset(data_path+'mtpr/era5_mtpr_1979_2020_monthlymean.nc').sel(time=slice('1980-01-01','2005-12-31'))
@@ -19,7 +18,6 @@ pr_1980 = xr.open_dataset(precip_path+'era5_mlspr_mcpr_1980_2000_monthlymean.nc'
 pr_2001 = xr.open_dataset(precip_path+'era5_mlspr_mcpr_2001_2005_monthlymean.nc')
 ds_pr = xr.concat([pr_1980,pr_2001],dim='valid_time').drop_vars(['number','expver']).rename({'valid_time':'time'}).assign_coords(time=ds_mtpr.time)
 
-#%%
 # Monthly climatology of zonally averaged precipitation
 conv_clim = ds_pr.avg_cpr.mean(dim='longitude').groupby('time.month').mean(dim='time')
 ls_clim = ds_pr.avg_lsprate.mean(dim='longitude').groupby('time.month').mean(dim='time')
@@ -117,16 +115,18 @@ def largescale_conv_r1(lat_north=60,lat_south=40,plot_rce=True, plot_rae=True,ym
 largescale_conv_r1()
 
 #%%
-largescale_conv_r1(lat_north=70,lat_south=60,ymin=-0.1,ymax=1.5,ymin_conv=0.5,ymax_conv=1.0)
-largescale_conv_r1(lat_north=90,lat_south=70,ymin=0.6,ymax=1.1,ymin_conv=0.8,ymax_conv=1.0)
-largescale_conv_r1(lat_north=40,lat_south=30,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
-largescale_conv_r1(lat_north=30,lat_south=10,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
-largescale_conv_r1(lat_north=10,lat_south=-10,ymax=0.2,ymin=-0.5,ymax_conv=0.4,ymin_conv=0.2)
-largescale_conv_r1(lat_north=-10,lat_south=-30,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
-largescale_conv_r1(lat_north=-30,lat_south=-40,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
-largescale_conv_r1(lat_north=-40,lat_south=-60,ymax=0.8,ymin=0.2,ymax_conv=0.8,ymin_conv=0.5)
-largescale_conv_r1(lat_north=-60,lat_south=-70,ymax=1.0,ymin=0.6,ymax_conv=1.0,ymin_conv=0.8)
-largescale_conv_r1(lat_north=-70,lat_south=-90,ymax=1.4,ymin=1.0,ymax_conv=1.0,ymin_conv=0.9)
+largescale_conv_r1(lat_north=50,lat_south=40,ymin=-0.4,ymax=1.0,ymin_conv=0.4,ymax_conv=0.8)
+largescale_conv_r1(lat_north=60,lat_south=50,ymin=-0.2,ymax=1.0,ymin_conv=0.4,ymax_conv=0.9)
+#largescale_conv_r1(lat_north=70,lat_south=60,ymin=-0.1,ymax=1.5,ymin_conv=0.5,ymax_conv=1.0)
+#largescale_conv_r1(lat_north=90,lat_south=70,ymin=0.6,ymax=1.1,ymin_conv=0.8,ymax_conv=1.0)
+#largescale_conv_r1(lat_north=40,lat_south=30,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
+#largescale_conv_r1(lat_north=30,lat_south=10,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
+#largescale_conv_r1(lat_north=10,lat_south=-10,ymax=0.2,ymin=-0.5,ymax_conv=0.4,ymin_conv=0.2)
+#largescale_conv_r1(lat_north=-10,lat_south=-30,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
+#largescale_conv_r1(lat_north=-30,lat_south=-40,ymax=0.2,ymin=-0.5,ymax_conv=0.6,ymin_conv=0.3)
+#largescale_conv_r1(lat_north=-40,lat_south=-60,ymax=0.8,ymin=0.2,ymax_conv=0.8,ymin_conv=0.5)
+#largescale_conv_r1(lat_north=-60,lat_south=-70,ymax=1.0,ymin=0.6,ymax_conv=1.0,ymin_conv=0.8)
+#largescale_conv_r1(lat_north=-70,lat_south=-90,ymax=1.4,ymin=1.0,ymax_conv=1.0,ymin_conv=0.9)
 
 
 #%%
@@ -142,11 +142,11 @@ ls_tavg = largescale_fraction.mean(dim='time')
 fig, ax = plt.subplots(figsize=(5,3))
 r1_tavg.plot(ax=ax,color='k')
 ax2 = ax.twinx()
+ls_tavg.plot(ax=ax2,color='blue')
 ax2.set_ylim(ymin_conv,ymax_conv)
-ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
 ax2.set_yticks(np.arange(ymin_conv,ymax_conv+0.1,0.1))
 ax2.set_yticklabels(np.round(np.arange(ymin_conv,ymax_conv+0.1,0.1),2),color='blue')
-ls_tavg.plot(ax=ax2,color='blue')
+ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
 ax.set_ylabel('$R_1$ [~]')
 ax.set_xlabel('Latitude [degrees]')
 ax.fill_between(np.linspace(-90,90,100),0.9,1.8,color='lightblue',alpha=0.5)
@@ -156,4 +156,183 @@ ax.set_xlim(-90,90)
 plt.savefig(plot_path+'annual_average_precip_r1.pdf',dpi=300,bbox_inches='tight')
 
 #%%
+# Land and Ocean for R1 and convective / large-scale precipitation
+ds_topo = xr.open_dataset('/project2/tas1/katharinah/mse/topography/topo_era5_1440.nc')
+sea = xr.where(ds_topo.topo>0,0.0,1.0)
+land = xr.where(ds_topo.topo>0,1.0,0.0)
+
+# Multiply with land / sea mask and then average over longitudes
+ra_land = (ra * land).mean(dim='longitude')
+sh_land = (ds_stf.sshf * land).mean(dim='longitude')
+lh_land = (ds_stf.slhf * land).mean(dim='longitude')
+
+ra_sea = (ra * sea).mean(dim='longitude')
+sh_sea = (ds_stf.sshf * sea).mean(dim='longitude')
+lh_sea = (ds_stf.slhf * sea).mean(dim='longitude')
+
+r1_land = 1.0 - (sh_land + lh_land) / ra_land
+r1_sea = 1.0 - (sh_sea + lh_sea) / ra_sea
+
+convective_land = (ds_pr.avg_cpr * land).mean(dim='longitude')
+convective_sea = (ds_pr.avg_cpr * sea).mean(dim='longitude')
+
+largescale_land = (ds_pr.avg_lsprate * land).mean(dim='longitude')
+largescale_sea = (ds_pr.avg_lsprate * sea).mean(dim='longitude')
+
+#%%
+largescale_fraction_land = largescale_land / (convective_land + largescale_land)
+largescale_fraction_sea = largescale_sea / (convective_sea + largescale_sea)
+
+#%%
+ymin_conv = 0.1
+ymax_conv = 1.3
+
+
+fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11,3))
+# Land
+ax = axes[0]
+r1_land.mean(dim='time').plot(ax=ax,color='k')
+ax2 = ax.twinx()
+largescale_fraction_land.mean(dim='time').plot(ax=ax2,color='blue')
+ax2.set_ylim(ymin_conv,ymax_conv)
+ax2.set_yticks(np.arange(ymin_conv,ymax_conv+0.1,0.1))
+ax2.set_yticklabels(np.round(np.arange(ymin_conv,ymax_conv+0.1,0.1),2),color='blue')
+ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
+ax.set_ylabel('$R_1$ [~]')
+ax.set_xlabel('Latitude [degrees]')
+ax.fill_between(np.linspace(-90,90,100),0.9,1.8,color='lightblue',alpha=0.5)
+ax.fill_between(np.linspace(-90,90,100),-0.8,0.1,color='darkorange',alpha=0.5)
+ax.set_ylim(-0.8,1.8)
+ax.set_xlim(-90,90)
+ax.set_title('Land')
+# Sea
+ax = axes[1]
+r1_sea.mean(dim='time').plot(ax=ax,color='k')
+ax2 = ax.twinx()
+largescale_fraction_sea.mean(dim='time').plot(ax=ax2,color='blue')
+ax2.set_ylim(ymin_conv,ymax_conv)
+ax2.set_yticks(np.arange(ymin_conv,ymax_conv+0.1,0.1))
+ax2.set_yticklabels(np.round(np.arange(ymin_conv,ymax_conv+0.1,0.1),2),color='blue')
+ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
+ax.set_ylabel('$R_1$ [~]')
+ax.set_xlabel('Latitude [degrees]')
+ax.fill_between(np.linspace(-90,90,100),0.9,1.8,color='lightblue',alpha=0.5)
+ax.fill_between(np.linspace(-90,90,100),-0.8,0.1,color='darkorange',alpha=0.5)
+ax.set_ylim(-0.8,1.8)
+ax.set_xlim(-90,90)
+ax.set_title('Ocean')
+plt.subplots_adjust(wspace=0.4)
+plt.savefig(plot_path+'annual_average_precip_landsea_r1.pdf',dpi=300,bbox_inches='tight')
+
+# %%
+# Monthly climatology
+largescale_fraction_land_clim = largescale_fraction_land.groupby('time.month').mean(dim='time')
+largescale_fraction_sea_clim = largescale_fraction_sea.groupby('time.month').mean(dim='time')
+r1_land_clim = r1_land.groupby('time.month').mean(dim='time')
+r1_sea_clim = r1_sea.groupby('time.month').mean(dim='time')
+
+def largescale_conv_r1_landsea(lat_north=60,lat_south=40,plot_rce=True, plot_rae=True,ymin=-1.5,ymax=1.2,ymin_conv=0.3,ymax_conv=1.0):
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11,3))
+    ax = axes[0]
+    r1_land_clim.sel(latitude=slice(lat_north,lat_south)).mean(dim='latitude').plot(ax=ax,color='k')
+    ax2 = ax.twinx()
+    largescale_fraction_land_clim.sel(latitude=slice(lat_north,lat_south)).mean(dim='latitude').plot(ax=ax2,color='blue')
+    if plot_rae:
+        ax.fill_between(np.linspace(1,12,100),0.9,ymax,color='lightblue',alpha=0.5)
+    if plot_rce:
+        ax.fill_between(np.linspace(1,12,100),ymin,0.1,color='darkorange',alpha=0.5)
+    ax.set_xlim(1,12)
+    ax.set_ylim(ymin,ymax)
+    ax2.set_ylim(ymin_conv,ymax_conv)
+    ax.set_ylabel('$R_1$')
+    ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
+    ax2.set_yticks(np.arange(ymin_conv,ymax_conv+0.1,0.1))
+    ax2.set_yticklabels(np.round(np.arange(ymin_conv,ymax_conv+0.1,0.1),2),color='blue')
+    ax.set_title('Land')
+
+    # Sea
+    ax = axes[1]
+    r1_sea_clim.sel(latitude=slice(lat_north,lat_south)).mean(dim='latitude').plot(ax=ax,color='k')
+    ax2 = ax.twinx()
+    largescale_fraction_sea_clim.sel(latitude=slice(lat_north,lat_south)).mean(dim='latitude').plot(ax=ax2,color='blue')
+    if plot_rae:
+        ax.fill_between(np.linspace(1,12,100),0.9,ymax,color='lightblue',alpha=0.5)
+    if plot_rce:
+        ax.fill_between(np.linspace(1,12,100),ymin,0.1,color='darkorange',alpha=0.5)
+    ax.set_xlim(1,12)
+    ax.set_ylim(ymin,ymax)
+    ax2.set_ylim(ymin_conv,ymax_conv)
+    ax.set_ylabel('$R_1$')
+    ax2.set_ylabel('Large-scale precipitation fraction',color='blue')
+    ax2.set_yticks(np.arange(ymin_conv,ymax_conv+0.1,0.1))
+    ax2.set_yticklabels(np.round(np.arange(ymin_conv,ymax_conv+0.1,0.1),2),color='blue')
+    ax.set_title('Ocean')
+    plt.subplots_adjust(wspace=0.4)
+    plt.savefig(plot_path+'lat_landsea_'+str(lat_north)+'_'+str(lat_south)+'.pdf',bbox_inches='tight')
+
+
+largescale_conv_r1_landsea()
+
+#%%
+#largescale_conv_r1_landsea(lat_north=50,lat_south=40,ymin = -1.8)
+#largescale_conv_r1_landsea(lat_north=60,lat_south=50)
+#largescale_conv_r1_landsea(lat_north=70,lat_south=60,ymin=-0.8,ymin_conv = 0.4)
+#largescale_conv_r1_landsea(lat_north=80,lat_south=70,ymin=0.5,plot_rce=False,ymin_conv=0.7)
+#largescale_conv_r1_landsea(lat_north=90,lat_south=80,ymin=0.7,plot_rce=False,ymin_conv=0.8)
+#largescale_conv_r1_landsea(lat_north=40,lat_south=30,ymax=1.0,ymin=-1.5,ymin_conv=0.3,ymax_conv=0.7)
+#largescale_conv_r1_landsea(lat_north=30,lat_south=20,ymax=0.8,ymin=-0.9,ymin_conv=0.2,ymax_conv=0.7)
+#largescale_conv_r1_landsea(lat_north=20,lat_south=10,ymin_conv=0.0,ymax_conv=0.6,ymax=0.6,ymin=-1.2)
+#largescale_conv_r1_landsea(lat_north=10,lat_south=0,ymin=-1.0,ymax=0.6,ymin_conv=0.0,ymax_conv=0.4)
+#largescale_conv_r1_landsea(lat_north=0,lat_south=-10,ymin=-1.5,ymax=0.6,ymin_conv=0.0,ymax_conv=0.4)
+#largescale_conv_r1_landsea(lat_north=-10,lat_south=-20,ymin=-1.8,ymax=0.5,ymin_conv=0.0,ymax_conv=0.6)
+#largescale_conv_r1_landsea(lat_north=-20,lat_south=-30,ymin=-1.5,ymax=0.8,ymin_conv=0.2,ymax_conv=0.6)
+#largescale_conv_r1_landsea(lat_north=-30,lat_south=-40,ymin=-2.0,ymax=1.0,ymin_conv=0.2,ymax_conv=0.7)
+#largescale_conv_r1_landsea(lat_north=-40,lat_south=-50,ymin=-2,ymin_conv=0.5,ymax_conv=0.9)
+#largescale_conv_r1_landsea(lat_north=-50,lat_south=-60,ymin_conv=0.5,ymax_conv=0.8)
+#largescale_conv_r1_landsea(lat_north=-60,lat_south=-70,ymin_conv=0.8,ymax_conv=1.0,ymin=0.4,ymax=1.2)
+#largescale_conv_r1_landsea(lat_north=-70,lat_south=-80,ymin=0.4,ymax=1.5,ymin_conv=0.8,ymax_conv=1.0)
+#largescale_conv_r1_landsea(lat_north=-80,lat_south=-90,ymin=0.9,ymax=1.5,ymin_conv=0.9,ymax_conv=1.0)
+
+
+#%%
+# Compare evaporation (latent heat flux) and precipitation
+latent_heat_flux = ds_stf.slhf.mean(dim='time')
+largescale_latlon = ds_pr.avg_lsprate.mean(dim='time')
+convective_latlon = ds_pr.avg_cpr.mean(dim='time')
+precip_latlon = (largescale_latlon + convective_latlon)# * 86400.0  # in mm/day
+
+#%%
+fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10,7))
+axes = axes.flatten()
+# Latent heat flux
+ax = axes[0]
+(-latent_heat_flux).plot(ax=ax,y='latitude',cmap='Blues',cbar_kwargs={'label':'Latent heat flux [W m$^{-2}$]'},\
+                      vmin=0,vmax=2e7)
+ax.set_title('Latent heat flux (evaporation)')
+ax.set_xlabel('Longitude [degrees]')
+ax.set_ylabel('Latitude [degrees]')
+# Precipitation
+ax = axes[1]
+precip_latlon.plot(ax=ax,y='latitude',cmap='Blues',cbar_kwargs={'label':'Precipitation rate [kg m$^{-2}$ s$^{-1}$]'},\
+                   vmin=0,vmax=0.0001)
+ax.set_title('Precipitation rate')
+ax.set_xlabel('Longitude [degrees]')
+ax.set_ylabel('Latitude [degrees]')
+# Large-scale precipitation
+ax = axes[2]
+largescale_latlon.plot(ax=ax,y='latitude',cmap='Blues',cbar_kwargs={'label':'Large-scale precipitation rate [kg m$^{-2}$ s$^{-1}$]'},\
+                     vmin=0,vmax=0.00005)
+ax.set_title('Large-scale precipitation rate')
+ax.set_xlabel('Longitude [degrees]')
+ax.set_ylabel('Latitude [degrees]')
+# Convective precipitation
+ax = axes[3]
+convective_latlon.plot(ax=ax,y='latitude',cmap='Blues',cbar_kwargs={'label':'Convective precipitation rate [kg m$^{-2}$ s$^{-1}$]'},\
+                     vmin=0,vmax=0.00005)
+ax.set_title('Convective precipitation rate')
+ax.set_xlabel('Longitude [degrees]')
+ax.set_ylabel('Latitude [degrees]')
+plt.subplots_adjust(wspace=0.4,hspace=0.4)
+
+
 

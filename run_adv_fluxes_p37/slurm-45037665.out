@@ -1,0 +1,1 @@
+/var/spool/slurm/d/job45037665/slurm_script: line 21: 4166337 Segmentation fault      (core dumped) python3 p37_mse_budget.py

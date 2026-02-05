@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/home/katharinah/scripts/mse_era5/run_adv_fluxes_p37/p37_mse_budget.py", line 14, in <module>
+    bud = mseb.mse_budget(config_file='mse_budget.ini', timestep=timestep, time_interval='1 day', budget='daily_P37_varp')
+  File "/home/katharinah/scripts/mse_era5/run_adv_fluxes_p37/../mse_budget_centered_diff.py", line 221, in __init__
+    self.load_netcdf_plev_data()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/katharinah/scripts/mse_era5/run_adv_fluxes_p37/../mse_budget_centered_diff.py", line 329, in load_netcdf_plev_data
+    filename = self.config['data'].get(key, '').strip()
+               ~~~~~~~~~~~^^^^^^^^
+  File "/home/katharinah/.local/share/uv/python/cpython-3.13.3-linux-x86_64-gnu/lib/python3.13/configparser.py", line 998, in __getitem__
+    raise KeyError(key)
+KeyError: 'data'
