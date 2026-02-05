@@ -22,7 +22,7 @@ sys.path.append('..')
 
 import mse_budget_centered_diff as mseb
 
-timestep = pd.Timestamp('2005-06-02 07:00')
+timestep = pd.Timestamp('2005-06-02 01:00')
 
 average_hours = 23 # If >0, average over timestep + average_hours hours
 
@@ -34,6 +34,9 @@ ds_latlon = xr.open_mfdataset(data_path+'with_time_coordinate/*latlon*.nc')
 if average_hours > 0:
     ds = ds_latlon.sel(time=slice(timestep,timestep + pd.Timedelta(hours=average_hours))).mean(dim='time')
     plot_timestring = f'{timestep:%Y-%m-%d %H} to {timestep + pd.Timedelta(hours=average_hours):%Y-%m-%d %H} UTC'
+elif average_hours == -2: # daily mean, p37
+    ds = xr.open_dataset('/media/katharina/Volume/UChicago/ERA5/mse_output/mse_daily_P37_latlon_2005060300.nc')
+    plot_timestring = '2005060300_dailymean_P37'
 else:
     ds = ds_latlon.sel(time=timestep)
     plot_timestring = f'{timestep:%Y-%m-%d %H} UTC'

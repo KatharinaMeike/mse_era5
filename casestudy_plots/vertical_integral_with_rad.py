@@ -65,37 +65,38 @@ r1 = 1.0 + (sensible_heat_flux.mean(dim='longitude') + latent_heat_flux.mean(dim
 
 #%%
 # Advection of MSE
-mse_advection = -(ds.zonal_adv_mse.mean(dim='longitude') +\
+mse_advection = (ds.zonal_adv_mse.mean(dim='longitude') +\
                  ds.meridional_adv_mse.mean(dim='longitude') +\
                  ds.vertical_adv_mse.mean(dim='longitude'))
 
 tendency = ds.mse_tendency.mean(dim='longitude')
 
-residual = mse_advection - tendency + sensible_heat_flux.mean(dim='longitude') +\
+residual = -tendency - mse_advection + sensible_heat_flux.mean(dim='longitude') +\
       latent_heat_flux.mean(dim='longitude') + ra.mean(dim='longitude')
 
-fig, axes = plt.subplots(ncols=2, figsize=(8,4),sharey=True,width_ratios=[3,1])
-ax = axes[0]
-mse_advection.plot(ax=ax, y='latitude', label='MSE Advection', color='C0')
-tendency.plot(ax=ax, y='latitude', label='MSE Tendency', color='C1')
-sensible_heat_flux.mean(dim='longitude').plot(ax=ax, y='latitude', label='Sensible Heat Flux', color='C2')
-latent_heat_flux.mean(dim='longitude').plot(ax=ax, y='latitude', label='Latent Heat Flux', color='C3')
-ra.mean(dim='longitude').plot(ax=ax, y='latitude', label='Net Radiative Flux', color='C4')
-residual.plot(ax=ax, y='latitude', label='Residual', color='k', linestyle='--')
+fig, ax = plt.subplots(figsize=(6,4),sharey=True)
+sensible_heat_flux.mean(dim='longitude').plot(ax=ax, y='latitude', label='SH', color='C2')
+latent_heat_flux.mean(dim='longitude').plot(ax=ax, y='latitude', label='LH', color='blue')
+(tendency +mse_advection).plot(ax=ax, y='latitude', label='$\partial_t m + \partial_y (vm)$', color='red')
+ra.mean(dim='longitude').plot(ax=ax, y='latitude', label='$R_a$', color='C4')
+residual.plot(ax=ax, y='latitude', label='$-\partial_t m - \partial_y (vm)$ + SH + LH + $R_a$', color='k', linestyle='--')
+mse_advection.plot(ax=ax, y='latitude', label='$\partial_y (vm)$', color='C0',linewidth=0.5)
+tendency.plot(ax=ax, y='latitude', label='$\partial_t m$', color='C1',linewidth=0.5)
 ax.axvline(0, color='gray')
-ax.legend(loc='upper right')
+ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 ax.set_title('')
 ax.set_xlabel('MSE tendency [W m$^{-2}$]')
 ax.set_ylabel('')
+ax.set_xlim(-300,300)
 ax.set_yticks([-90, -60, -30, 0, 30, 60, 90])
 ax.set_yticklabels(['90°S', '60°S', '30°S', '0', '30°N', '60°N', '90°N'])
-ax = axes[1]
-r1.plot(ax=ax, y='latitude', label='R1', color='k')
-ax.set_ylabel('')
-ax.set_xlabel('R1 [~]')
-ax.axvline(0.1,color='orange')
-ax.axvline(0.9,color='lightblue')
-ax.set_title('')
+#ax = axes[1]
+#r1.plot(ax=ax, y='latitude', label='R1', color='k')
+#ax.set_ylabel('')
+#ax.set_xlabel('R1 [~]')
+#ax.axvline(0.1,color='orange')
+#ax.axvline(0.9,color='lightblue')
+#ax.set_title('')
 plt.savefig(plot_path+f'vertical_integral_{plot_timestring.replace(" ", "_")}.png', bbox_inches='tight', dpi=300)
 
 #%%
@@ -168,22 +169,26 @@ plt.savefig(plot_path+f'vertical_integral_fluxdiv_{plot_timestring.replace(" ", 
 
 # Vertically integrated MSE budget with tendencies due to parametrizations
 # Advection of MSE
-mse_advection = -(ds.zonal_adv_mse.mean(dim='longitude') +\
+mse_advection = (ds.zonal_adv_mse.mean(dim='longitude') +\
                  ds.meridional_adv_mse.mean(dim='longitude') +\
                  ds.vertical_adv_mse.mean(dim='longitude'))
 
 tendency = ds.mse_tendency.mean(dim='longitude')
 
-residual = mse_advection - tendency + ds.mse_tendency_longwave.mean(dim='longitude') +\
+residual = -mse_advection - tendency + ds.mse_tendency_longwave.mean(dim='longitude') +\
       ds.mse_tendency_shortwave.mean(dim='longitude') + ds.mse_tendency_convection.mean(dim='longitude')
 
-fig, axes = plt.subplots(ncols=2, figsize=(8,4),sharey=True,width_ratios=[3,1])
-ax = axes[0]
-tendency.plot(ax=ax, y='latitude', label='MSE Tendency', color='C1')
-ds.mse_tendency_shortwave.mean(dim='longitude').plot(ax=ax, y='latitude', label='Short-wave radiation', color='C5')
-ds.mse_tendency_longwave.mean(dim='longitude').plot(ax=ax, y='latitude', label='Long-wave radiation', color='C6')
-ds.mse_tendency_convection.mean(dim='longitude').plot(ax=ax, y='latitude', label='Convection', color='C7')
-residual.plot(ax=ax, y='latitude', label='Residual', color='k', linestyle='--')
+fig, ax = plt.subplots(figsize=(8,4))
+#ax = axes[0]
+
+#ds.mse_tendency_shortwave.mean(dim='longitude').plot(ax=ax, y='latitude', label='Short-wave radiation', color='C5')
+#ds.mse_tendency_longwave.mean(dim='longitude').plot(ax=ax, y='latitude', label='Long-wave radiation', color='C6')
+(ds.mse_tendency_shortwave.mean(dim='longitude') + ds.mse_tendency_longwave.mean(dim='longitude')).plot(ax=ax, y='latitude', label='$R_a$', color='purple')
+(tendency +mse_advection).plot(ax=ax, y='latitude', label='$\partial_t m + \partial_y (vm)$', color='red')
+ds.mse_tendency_convection.mean(dim='longitude').plot(ax=ax, y='latitude', label='$c_p P_\mathrm{nR} + L P_q$', color='C7')
+residual.plot(ax=ax, y='latitude', label='$-\partial_t m$ - Adv. + $c_p P_\mathrm{nR} + L P_q$ + $R_a$', color='k', linestyle='--')
+mse_advection.plot(ax=ax, y='latitude', label='Adv. = $u \partial_x m + v \partial_y m + \omega \partial_p m$', color='C0',linewidth=0.5)
+tendency.plot(ax=ax, y='latitude', label='$\partial_t m$', color='C1',linewidth=0.5)
 ax.axvline(0, color='gray')
 ax.legend(loc='upper right',fontsize='small')
 ax.set_title('')
@@ -192,13 +197,13 @@ ax.set_ylabel('')
 ax.set_yticks([-90, -60, -30, 0, 30, 60, 90])
 ax.set_xlim(-400,500)
 ax.set_yticklabels(['90°S', '60°S', '30°S', '0', '30°N', '60°N', '90°N'])
-ax = axes[1]  
+"""ax = axes[1]  
 r1.plot(ax=ax, y='latitude', label='R1', color='k')
 ax.set_ylabel('')
 ax.set_xlabel('R1 [~]')
 ax.axvline(0.1,color='orange')
 ax.axvline(0.9,color='lightblue')
-ax.set_title('')
+ax.set_title('')"""
 plt.savefig(plot_path+f'vertical_integral_convrad_{plot_timestring.replace(" ", "_")}.png', bbox_inches='tight', dpi=300)
 
 #%%

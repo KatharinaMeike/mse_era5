@@ -16,7 +16,7 @@ import mse_budget_centered_diff as mseb
 
 timestep = pd.Timestamp('2005-06-02 01:00')
 
-average_hours = 23 # If >0, average over timestep + average_hours hours
+average_hours = -2 # If >0, average over timestep + average_hours hours
 
 data_path = '/media/katharina/Volume/UChicago/ERA5/mse_output/'
 plot_path = '/media/katharina/Volume/UChicago/MSE/plots/casestudy/'
@@ -29,6 +29,9 @@ if average_hours > 0:
 elif average_hours == -1: # daily mean
     ds = xr.open_dataset('/media/katharina/Volume/UChicago/ERA5/mse_output/mse_daily_P137_levlat_2005060300.nc')
     plot_timestring = '2005060300_dailymean'
+elif average_hours == -2: # daily mean, p37
+    ds = xr.open_dataset('/media/katharina/Volume/UChicago/ERA5/mse_output/mse_daily_P37_levlat_2005060300.nc')
+    plot_timestring = '2005060300_dailymean_P37'
 else:
     ds = ds_levlat.sel(time=timestep)
     plot_timestring = f'{timestep:%Y-%m-%d %H} UTC'
